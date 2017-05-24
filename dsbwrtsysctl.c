@@ -29,6 +29,7 @@
 #include <limits.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/sysctl.h>
@@ -36,8 +37,6 @@
 #include <sys/stat.h>
 
 #define PATH_SYSCTL_CONF "/etc/sysctl.conf"
-
-typedef enum { false, true } bool;
 
 typedef struct var_s {
 	char *var;
@@ -92,6 +91,8 @@ readln(FILE *fp)
 	for (errno = 0;;) {
 		if (bsize == 0 || len == bsize - 1) {
 			buf = realloc(buf, bsize + _POSIX2_LINE_MAX);
+			if (buf == NULL)
+				err(EXIT_FAILURE, "realloc()");
 			bsize += _POSIX2_LINE_MAX;
 		}
 		if (slen > 0)
@@ -104,7 +105,8 @@ readln(FILE *fp)
 			if (!ferror(fp) && len > 0) {
 				len = 0;
 				return (buf);
-			}
+			} else if (ferror(fp))
+				err(EXIT_FAILURE, "fread()");
 			return (NULL);
 		}
 		len += rd; buf[len] = '\0';
