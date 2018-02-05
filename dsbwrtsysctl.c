@@ -21,7 +21,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-
+#define _WITH_GETLINE
 #include <stdio.h>
 #include <ctype.h>
 #include <err.h>
@@ -47,10 +47,9 @@ typedef struct var_s {
 static int   nvars = 0;
 static var_t *vars = NULL;
 
-static char  *readln(FILE *);
-static void  add_var(const char *, const char *);
-static void  write_vars(void);
-static void  usage(void);
+static void add_var(const char *, const char *);
+static void write_vars(void);
+static void usage(void);
 
 int
 main(int argc, char *argv[])
@@ -82,37 +81,6 @@ main(int argc, char *argv[])
 	return (EXIT_SUCCESS);
 }
 
-static char *
-readln(FILE *fp)
-{
-	static char   *p, *buf = NULL;
-	static size_t bsize = 0, slen = 0, rd, len = 0;
-	
-	for (errno = 0;;) {
-		if (bsize == 0 || len == bsize - 1) {
-			buf = realloc(buf, bsize + _POSIX2_LINE_MAX);
-			if (buf == NULL)
-				err(EXIT_FAILURE, "realloc()");
-			bsize += _POSIX2_LINE_MAX;
-		}
-		if (slen > 0)
-			(void)memmove(buf, buf + slen, len + 1), slen = 0;
-		if (len > 0 && (p = strchr(buf, '\n')) != NULL) {
-			slen = p - buf + 1; buf[slen - 1] = '\0'; len -= slen;
-			return (buf);
-		}
-		if ((rd = fread(buf + len, 1, bsize - len - 1, fp)) == 0) {
-			if (!ferror(fp) && len > 0) {
-				len = 0;
-				return (buf);
-			} else if (ferror(fp))
-				err(EXIT_FAILURE, "fread()");
-			return (NULL);
-		}
-		len += rd; buf[len] = '\0';
-	}
-}
-
 static void
 add_var(const char *var, const char *val)
 {
@@ -140,11 +108,12 @@ write_vars()
 {
 	int	    i, fd;
 	FILE	    *fp, *tmp;
-	char	    *p, *ln, tmpath[] = PATH_SYSCTL_CONF".XXXX";
-	bool	    found;
-	size_t	    len;
+	char	    *buf, *p, tmpath[] = PATH_SYSCTL_CONF".XXXX";
+	bool	    found, nl;
+	size_t	    len, lc;
 	struct stat sb;
 
+	buf = NULL; lc = 0;
 	if (stat(PATH_SYSCTL_CONF, &sb) == -1)
 		err(EXIT_FAILURE, "stat(%s)", PATH_SYSCTL_CONF);
 	if ((fp = fopen(PATH_SYSCTL_CONF, "r+")) == NULL)
@@ -155,9 +124,13 @@ write_vars()
 		err(EXIT_FAILURE, "mkstemp()");
 	if ((tmp = fdopen(fd, "w")) == NULL)
                 err(EXIT_FAILURE, "fdopen()");
-	while ((ln = readln(fp)) != NULL) {
+	while (getline(&buf, &lc, fp) != -1) {
+		if (strchr(buf, '\n') != NULL)
+			nl = true;
+		else
+			nl = false;
 		/* Skip leading white spaces. */
-		for (p = ln; *p != '\0' && isspace(*p); p++)
+		for (p = buf; *p != '\0' && isspace(*p); p++)
 			;
 		len = strcspn(p, "=");
 		for (i = 0, found = false; !found && i < nvars;) {
@@ -168,17 +141,17 @@ write_vars()
 				i++;
 		}
 		if (!found) {
-			if (fprintf(tmp, "%s\n", ln) < 0)
+			if (fprintf(tmp, "%s", buf) < 0)
 				err(EXIT_FAILURE, "fprintf()");
 		} else {
-			if (fprintf(tmp, "%s=%s\n", vars[i].var,
-			    (char *)vars[i].val) < 0)
+			if (fprintf(tmp, "%s=%s%s", vars[i].var,
+			    (char *)vars[i].val, nl ? "\n" : "") < 0)
 				err(EXIT_FAILURE, "fprintf()");
 			vars[i].written = true;
 		}
 	}
 	if (ferror(fp))
-		err(EXIT_FAILURE, "readln()");
+		err(EXIT_FAILURE, "getline()");
 	for (i = 0; i < nvars; i++) {
 		if (vars[i].written)
 			continue;
